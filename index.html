@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MAITRI 2026 Check-in</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Arial,sans-serif;background:#f3f8f5;color:#143f34;max-width:520px;margin:0 auto;padding:20px}
+main{background:#fff;border-radius:18px;padding:20px;box-shadow:0 2px 15px #0001}h1{font-size:25px;margin:4px 0 10px}p{line-height:1.4;color:#56716a;margin:10px 0}
+#reader{width:100%;overflow:hidden;border-radius:12px}#status{padding:16px;white-space:pre-line;background:#edf2f1;border-radius:12px;min-height:60px;margin:12px 0;font-weight:700}
+#status.good{background:#e0f7e5;color:#08623c}#status.bad{background:#fff1d8;color:#885200}#status.error{background:#ffe6e6;color:#a22024}
+button{width:100%;background:#146149;color:white;font-size:17px;font-weight:700;border:none;border-radius:10px;padding:16px;margin:9px 0}#next{display:none}.small{font-size:12px}#health{font-size:13px;color:#56716a}
+</style></head><body><main><h1>MAITRI 2026 Check-in</h1><p>Scan a badge. Attendance is recorded automatically.</p>
+<div id="health">Checking attendance service…</div><div id="reader"></div><div id="status" role="status" aria-live="polite">Starting scanner…</div>
+<button id="next" type="button">Scan next badge</button><p class="small">Open in Safari or Chrome. Camera and internet required. Keep this link private.</p></main>
+<script>
+'use strict';
+// If Google Apps Script creates a NEW deployment URL, replace this value, then commit to GitHub.
+const API_URL='https://script.google.com/macros/s/AKfycbwIOvoNo5u6DFIixavXsVOaNaPPQ0bmsVNrh7gpveVwrscjE37KTOAGbAP4MkAvYM037w/exec';
+const el=document.getElementById('status'), next=document.getElementById('next'),health=document.getElementById('health');
+let scanner=null,busy=false,number=0;
+function show(text,kind=''){el.textContent=text;el.className=kind;}
+function api(action,token=''){
+ return new Promise((resolve,reject)=>{
+  const cb='maitriResult'+(++number),script=document.createElement('script');
+  let done=false;
+  const timer=setTimeout(()=>finish(new Error('Attendance service timed out')),15000);
+  function finish(error,value){if(done)return;done=true;clearTimeout(timer);script.remove();delete window[cb];error?reject(error):resolve(value);}
+  window[cb]=value=>finish(null,value);
+  script.onerror=()=>finish(new Error('Cannot reach Google Apps Script. Check deployment access, new version and URL.'));
+  script.src=API_URL+'?callback='+encodeURIComponent(cb)+'&action='+encodeURIComponent(action)+'&token='+encodeURIComponent(token)+'&_='+Date.now();
+  document.head.appendChild(script);
+ });
+}
+function scanResult(token){
+ if(busy)return;busy=true;
+ try{scanner&&scanner.pause(true);}catch(e){}
+ show('Recording attendance…');next.style.display='none';
+ api('checkin',token.trim()).then(r=>{
+  if(r.ok&&r.code==='SUCCESS')show('✓ Attendance recorded\n'+r.name+'\n'+r.id,'good');
+  else if(r.code==='DUPLICATE')show('Already checked in\n'+r.name+'\n'+r.id,'bad');
+  else show((r.message||'Unable to record attendance')+(r.code?' ['+r.code+']':''),'error');
+ }).catch(e=>show('Attendance NOT confirmed: '+e.message+'\nCheck Google Sheet before rescanning.','error'))
+ .finally(()=>{next.style.display='block';});
+}
+async function restart(){busy=false;next.style.display='none';show('Ready to scan');
+ if(scanner){try{await scanner.resume();return;}catch(e){}try{await scanner.clear();}catch(e){}}
+ start();
+}
+function start(){
+ if(!window.Html5QrcodeScanner){show('Scanner library not loaded. Check internet.','error');return;}
+ try{scanner=new Html5QrcodeScanner('reader',{fps:10,qrbox:{width:220,height:220},rememberLastUsedCamera:true},false);
+ scanner.render(scanResult,()=>{});show('Select Back Camera and tap Start Scanning');}
+ catch(e){show('Camera error: '+e.message,'error');}
+}
+next.addEventListener('click',restart);
+api('health').then(r=>{health.textContent=r.ok?'● Attendance service connected':'Service problem: '+r.message;health.style.color=r.ok?'#13864e':'#9b2424';})
+.catch(e=>{health.textContent='● Attendance service not connected: '+e.message;health.style.color='#9b2424';});
+start();
+</script></body></html>
